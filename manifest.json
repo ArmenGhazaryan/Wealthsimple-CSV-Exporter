@@ -1,0 +1,49 @@
+{
+  "manifest_version": 3,
+  "name": "Wealthsimple CSV Exporter",
+  "version": "1.0",
+  "description": "Exports Wealthsimple transaction data to CSV from the activity page.",
+  
+  // Permissions required by the extension.
+  "permissions": ["activeTab", "scripting", "storage"],
+  
+  // Host permissions grant the extension access to URLs that match these patterns.
+  "host_permissions": ["https://my.wealthsimple.com/*"],
+  
+  // Content scripts are JavaScript and CSS files that run in the context of web pages.
+  "content_scripts": [
+    {
+      "matches": ["https://my.wealthsimple.com/app/activity*"],
+      "js": ["content.js"],
+      "css": ["style.css"]
+    }
+  ],
+  
+  // Defines the behavior of the extension's icon in the browser toolbar (Manifest V3).
+  "action": {
+    "default_icon": { // Specifies the icons to display
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_title": "Wealthsimple CSV Exporter" // Tooltip text
+  },
+  
+  // Specifies the icons to be used for the extension in various contexts.
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  
+  // Declares which extension resources can be accessed by web pages.
+  // Necessary because content.js references 'images/csv-icon.png'.
+  "web_accessible_resources": [
+    {
+      "resources": ["images/csv-icon.png"],
+      "matches": ["https://my.wealthsimple.com/*"]
+    }
+  ]
+}
