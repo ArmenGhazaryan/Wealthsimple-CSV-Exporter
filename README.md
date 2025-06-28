@@ -10,10 +10,7 @@ A simple Chrome (and Chromium-based browser) extension designed to extract and d
 
 ## How to Install (for Development)
 
-1.  **Download/Clone:** Download this repository as a ZIP file and extract it, or clone it using Git:
-    ```bash
-    git clone [https://github.com/YourGitHubUsername/wealthsimple-csv-exporter.git](https://github.com/YourGitHubUsername/wealthsimple-csv-exporter.git)
-    ```
+1.  **Download/Clone:** Download this repository as a ZIP file and extract it, or clone it.
 2.  **Open Extensions Page:** Open your browser (Google Chrome is recommended for development) and navigate to `chrome://extensions`.
 3.  **Enable Developer Mode:** In the top right corner, toggle on "Developer mode".
 4.  **Load Unpacked:** Click the "Load unpacked" button.
@@ -26,6 +23,10 @@ A simple Chrome (and Chromium-based browser) extension designed to extract and d
 2.  An "Export to CSV" button will appear on the page (usually near the activity title).
 3.  Click the "Export to CSV" button.
 4.  A CSV file containing your transaction data will be downloaded to your computer.
+
+### Screenshot of the button on the Activity page:
+
+![Screenshot of Export Button on Wealthsimple Activity Page](images/activity-page-screenshot.png)
 
 ## Customization / Troubleshooting
 
@@ -40,10 +41,15 @@ The core logic for extracting transactions is in `content.js` within the `extrac
     * The date, description, and amount fields within each transaction.
 4.  Update the `document.querySelectorAll()` and `row.querySelector()` calls in `extractTransactions()` accordingly.
 
-## Contributing
-
-(Optional: Add sections on how others can contribute if you plan to make it open source)
-
 ## License
 
-(Optional: Add license information, e.g., MIT License)
+This project is licensed under the **MIT License**.
+
+The MIT License is a permissive free software license, meaning it allows reuse for any purpose,
+and it only requires that all copies of the licensed software include a copy of the MIT License terms and the copyright notice.
+
+You are free to:
+* **Use:** Privately and commercially.
+* **Modify:** Change and adapt the code.
+* **Distribute:** Share the code with others.
+* **Sublicense:** Grant others the right to use the software under the same or different terms.
