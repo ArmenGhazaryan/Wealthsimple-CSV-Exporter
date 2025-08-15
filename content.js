@@ -31,6 +31,7 @@ function parseDate(dateStr) {
     return date.toLocaleDateString("en-US", options);
 }
 
+
 /**
  * Generates a unique import ID for each transaction, useful for data reconciliation.
  * @param {string} date - The parsed date of the transaction.
