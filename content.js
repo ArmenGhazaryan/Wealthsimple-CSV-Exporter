@@ -1,4 +1,53 @@
 // content.js - Injects an "Export to CSV" button on the Wealthsimple Activity page and handles CSV export.
+// UPDATED VERSION - Uses more stable selectors that are less likely to break
+
+/**
+ * Automatically scrolls to the bottom of the page to load all transactions.
+ * Wealthsimple uses infinite scroll, so this loads transactions progressively.
+ * @returns {Promise<void>}
+ */
+async function autoScrollToLoadAll() {
+    console.log("Starting auto-scroll to load all transactions...");
+    
+    const scrollDelay = 800; // Wait 800ms between scrolls
+    const maxScrollAttempts = 200; // Maximum number of scroll attempts (safety limit)
+    let scrollAttempts = 0;
+    let previousHeight = 0;
+    let unchangedCount = 0;
+    
+    while (scrollAttempts < maxScrollAttempts) {
+        // Scroll to bottom
+        window.scrollTo(0, document.body.scrollHeight);
+        
+        // Wait for new content to load
+        await new Promise(resolve => setTimeout(resolve, scrollDelay));
+        
+        // Check if page height changed (new content loaded)
+        const currentHeight = document.body.scrollHeight;
+        
+        if (currentHeight === previousHeight) {
+            unchangedCount++;
+            
+            // If height hasn't changed for 3 consecutive attempts, we've likely reached the end
+            if (unchangedCount >= 3) {
+                console.log("Reached end of transactions (no new content loading)");
+                break;
+            }
+        } else {
+            unchangedCount = 0; // Reset counter if new content loaded
+            console.log(`Loaded more transactions... (scroll attempt ${scrollAttempts + 1})`);
+        }
+        
+        previousHeight = currentHeight;
+        scrollAttempts++;
+    }
+    
+    // Scroll back to top
+    window.scrollTo(0, 0);
+    await new Promise(resolve => setTimeout(resolve, 300));
+    
+    console.log(`Auto-scroll complete after ${scrollAttempts} attempts`);
+}
 
 /**
  * Parses a date string into a consistently formatted date string.
@@ -17,10 +66,8 @@ function parseDate(dateStr) {
         date.setDate(today.getDate() - 1);
     } else {
         // Attempt to parse a general date string.
-        // If no year is present, JavaScript's Date constructor often defaults to the current year.
         date = new Date(dateStr);
         // If the original dateStr doesn't contain a 4-digit year, explicitly set current year
-        // to handle cases where new Date() might pick an incorrect year (e.g., for "Dec 31" next year)
         if (!/\d{4}/.test(dateStr)) {
             date.setFullYear(today.getFullYear());
         }
@@ -31,7 +78,6 @@ function parseDate(dateStr) {
     return date.toLocaleDateString("en-US", options);
 }
 
-
 /**
  * Generates a unique import ID for each transaction, useful for data reconciliation.
  * @param {string} date - The parsed date of the transaction.
@@ -40,242 +86,294 @@ function parseDate(dateStr) {
  * @returns {string} A unique ID string.
  */
 function generateImportId(date, amount, merchant) {
-    // Convert amount to cents for better consistency and uniqueness in the ID,
-    // avoiding floating point issues.
     const amountForId = Math.round(parseFloat(amount) * 100);
-    // Combine date, amount, and merchant, then clean for URL/ID safety.
     return `ws-${date}-${amountForId}-${merchant}`.replace(/\s+/g, "").toLowerCase();
 }
 
 /**
  * Extracts transaction data from the Wealthsimple Activity page's DOM.
- * This function contains the specific scraping logic that was previously working for you.
- * It iterates through H2 elements (dates) and transaction rows to gather data.
+ * UPDATED: Uses more stable selectors based on data attributes and semantic patterns.
  * @returns {Array<Object>} An array of transaction objects.
  */
 function extractTransactions() {
     console.log("Attempting to extract transactions...");
-    // Select all H2 elements (which likely represent dates) and transaction row containers.
-    // The selectors 'h2[data-fs-privacy-rule="unmask"]' and 'div.sc-9b4b78e7-0.goMPYj'
-    // are crucial and based on Wealthsimple's specific HTML structure at the time this worked.
-    const elements = document.body.querySelectorAll('h2[data-fs-privacy-rule="unmask"], div.sc-9b4b78e7-0.goMPYj');
     const transactions = [];
-    let currentDate = ''; // To store the date from the most recently encountered H2 tag.
-
-    elements.forEach(el => {
-        // If it's an H2 tag, it contains a date. Update currentDate.
-        if (el.tagName === 'H2') {
-            currentDate = el.innerText.trim();
-        } 
-        // If it's a div with the specific class, it's a transaction row.
-        else if (el.classList.contains('goMPYj')) {
-            // Find the button within the transaction row which contains the details.
-            const rowButton = el.querySelector('div.sc-9b4b78e7-0.hdQWHv > button');
-
-            if (!rowButton) {
-                // If the expected button structure is not found, skip this element.
-                return;
-            }
-
-            // Extract merchant and amount elements within the row button.
-            const merchantEl = rowButton.querySelector('p.sc-cfb9aefc-0.bebPVD');
-            const amountEl = rowButton.querySelector('p.sc-cfb9aefc-0.jYlqYr');
-
-            if (!merchantEl || !amountEl) {
-                // If either merchant or amount is missing, skip this transaction.
-                return;
-            }
-
-            const merchant = merchantEl.innerText.trim();
-            let rawAmountText = amountEl.innerText.trim();
+    const seenTransactions = new Set(); // Track unique transactions to prevent duplicates
+    
+    // Strategy 1: Look for date headers and transaction rows using data-fs-privacy-rule
+    const dateHeaders = document.querySelectorAll('h2[data-fs-privacy-rule="unmask"]');
+    
+    if (dateHeaders.length > 0) {
+        console.log(`Found ${dateHeaders.length} date headers using data-fs-privacy-rule`);
+        
+        dateHeaders.forEach(dateHeader => {
+            const currentDate = dateHeader.innerText.trim();
             
-            // Clean the amount text: replace unicode minus with standard hyphen, then remove non-numeric characters except dot and hyphen.
-            const cleanedAmount = rawAmountText.replace(/−/g, '-') // Replace unicode minus with standard hyphen
-                                               .replace(/[^\d.-]/g, ''); // Remove any character that's not a digit, dot, or hyphen
-
-            let amountValue = parseFloat(cleanedAmount);
-
-            if (isNaN(amountValue)) {
-                console.warn('Wealthsimple CSV Exporter: Failed to parse amount. Original:', rawAmountText, 'Cleaned:', cleanedAmount);
-                amountValue = 0; // Default to 0 if parsing fails
+            // Find the next sibling container that has transaction buttons
+            let container = dateHeader.nextElementSibling;
+            
+            // Look for the container with transaction buttons
+            while (container && container !== dateHeader.parentElement.nextElementSibling) {
+                const buttons = container.querySelectorAll('button[type="button"]');
+                
+                if (buttons.length > 0) {
+                    buttons.forEach(button => {
+                        const paragraphs = button.querySelectorAll('p');
+                        
+                        if (paragraphs.length >= 2) {
+                            const merchant = paragraphs[0].innerText.trim();
+                            const rawAmountText = paragraphs[paragraphs.length - 1].innerText.trim();
+                            
+                            // Check if this looks like an amount
+                            if (/[\d$]/.test(rawAmountText)) {
+                                const cleanedAmount = rawAmountText
+                                    .replace(/[−–—\u2212]/g, '-')
+                                    .replace(/[^\d.-]/g, '');
+                                
+                                let amountValue = parseFloat(cleanedAmount);
+                                
+                                if (!isNaN(amountValue)) {
+                                    const parsedDate = parseDate(currentDate);
+                                    const importId = generateImportId(parsedDate, amountValue, merchant);
+                                    
+                                    // Only add if we haven't seen this transaction before
+                                    if (!seenTransactions.has(importId)) {
+                                        seenTransactions.add(importId);
+                                        transactions.push({
+                                            id: "",
+                                            date: parsedDate,
+                                            amount: amountValue,
+                                            payee: merchant,
+                                            notes: "",
+                                            category: "",
+                                            import_id: importId
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    break; // Found the transaction container, move to next date header
+                }
+                container = container.nextElementSibling;
             }
-
-            const amountDollars = amountValue;
-            const parsedDate = parseDate(currentDate); // Use the most recently found date
-
-            // Create the transaction object in the desired CSV format.
-            const transaction = {
-                id: "", // Placeholder, can be left empty or dynamically generated if needed
-                date: parsedDate,
-                amount: amountDollars,
-                payee: merchant,
-                notes: "", // Placeholder for notes
-                category: "", // Placeholder for category
-                import_id: generateImportId(parsedDate, amountValue, merchant) // Unique ID for import
-            };
-
-            transactions.push(transaction);
-        }
-    });
-
-    console.log(`Extracted ${transactions.length} transactions.`);
+        });
+    }
+    
+    // Only use Strategy 2 if Strategy 1 found nothing
+    if (transactions.length === 0) {
+        console.log("Strategy 1 found no transactions, trying alternative approach...");
+        
+        const allButtons = document.querySelectorAll('button[type="button"]');
+        let currentDate = '';
+        
+        // First pass: find all date headers
+        const dateMap = new Map();
+        document.querySelectorAll('h2').forEach(h2 => {
+            const text = h2.innerText.trim();
+            if (/today|yesterday|\d|\w{3,}/i.test(text)) {
+                const rect = h2.getBoundingClientRect();
+                dateMap.set(h2, { date: text, top: rect.top, bottom: rect.bottom });
+            }
+        });
+        
+        // Second pass: match buttons to dates
+        allButtons.forEach(button => {
+            const buttonRect = button.getBoundingClientRect();
+            
+            // Find the closest date header above this button
+            let closestDate = '';
+            let closestDistance = Infinity;
+            
+            dateMap.forEach((info, h2) => {
+                if (buttonRect.top > info.bottom) {
+                    const distance = buttonRect.top - info.bottom;
+                    if (distance < closestDistance && distance < 2000) { // Within 2000px
+                        closestDistance = distance;
+                        closestDate = info.date;
+                    }
+                }
+            });
+            
+            if (closestDate) {
+                const paragraphs = button.querySelectorAll('p');
+                
+                if (paragraphs.length >= 2) {
+                    const potentialMerchant = paragraphs[0].innerText.trim();
+                    const potentialAmount = paragraphs[paragraphs.length - 1].innerText.trim();
+                    
+                    if (/[\d$]/.test(potentialAmount) && potentialMerchant.length > 0) {
+                        const cleanedAmount = potentialAmount
+                            .replace(/[−–—\u2212]/g, '-')
+                            .replace(/[^\d.-]/g, '');
+                        
+                        const amountValue = parseFloat(cleanedAmount);
+                        
+                        if (!isNaN(amountValue)) {
+                            const parsedDate = parseDate(closestDate);
+                            const importId = generateImportId(parsedDate, amountValue, potentialMerchant);
+                            
+                            if (!seenTransactions.has(importId)) {
+                                seenTransactions.add(importId);
+                                transactions.push({
+                                    id: "",
+                                    date: parsedDate,
+                                    amount: amountValue,
+                                    payee: potentialMerchant,
+                                    notes: "",
+                                    category: "",
+                                    import_id: importId
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+    
+    console.log(`Extracted ${transactions.length} unique transactions.`);
+    
+    if (transactions.length > 0) {
+        console.log("First transaction:", transactions[0]);
+        console.log("Last transaction:", transactions[transactions.length - 1]);
+    }
+    
     return transactions;
 }
 
 /**
  * Downloads the given transactions as a CSV file.
- * This function combines the conversion to CSV and the download process.
  * @param {Array<Object>} transactions - An array of transaction objects.
  */
 function downloadCSV(transactions) {
     console.log("Preparing CSV content for download...");
     const headers = ["id", "date", "amount", "payee", "notes", "category", "import_id"];
     
-    // Create the CSV content string
     const csvContent = [
-        headers.join(","), // CSV header row
+        headers.join(","),
         ...transactions.map(tx => headers.map(h => {
             let value = tx[h];
-            // Format numbers to 2 decimal places and ensure all values are quoted for CSV safety
             if (typeof value === 'number' && isFinite(value)) { 
                 value = value.toFixed(2);
             }
-            // Ensure values with commas or quotes are properly escaped and quoted
             return `"${String(value).replace(/"/g, '""')}"`;
         }).join(","))
-    ].join("\n"); // Join all rows with newlines
+    ].join("\n");
 
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" }); // Create a Blob from the CSV string
-    const url = URL.createObjectURL(blob); // Create a URL for the Blob
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
     
-    const link = document.createElement("a"); // Create a temporary anchor element for download
+    const link = document.createElement("a");
     link.href = url;
-    link.download = `wealthsimple_transactions_${new Date().toISOString().slice(0,10)}.csv`; // Dynamic filename
+    link.download = `wealthsimple_transactions_${new Date().toISOString().slice(0,10)}.csv`;
     
-    document.body.appendChild(link); // Append to body (necessary for Firefox)
-    link.click(); // Programmatically click the link to trigger download
-    document.body.removeChild(link); // Clean up the temporary link
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
     
-    URL.revokeObjectURL(url); // Release the object URL
+    URL.revokeObjectURL(url);
     console.log("CSV download initiated successfully.");
 }
 
 /**
  * Attempts to find the "Activity" title on the page and place the export button next to it.
- * It also handles the button's click event to trigger transaction extraction and CSV download.
  * Returns true if the button was successfully placed, false otherwise.
  */
 function placeExportButton() {
-    // If the button already exists in the DOM, no need to add it again.
     if (document.getElementById("ws-export-btn")) {
         return true;
     }
 
-    // Helper function to find the "Activity" title element.
     const findActivityTitle = () => {
-        const headings = document.querySelectorAll('h1, h2'); // Check both H1 and H2 tags
+        const headings = document.querySelectorAll('h1, h2');
         for (const heading of headings) {
-            // Trim and convert to lowercase for robust matching.
             if (heading.innerText.trim().toLowerCase() === 'activity') {
                 return heading;
             }
         }
-        return null; // Return null if not found.
+        return null;
     };
 
     const activityTitle = findActivityTitle();
     const currentURL = window.location.href;
-    const targetURLPattern = "https://my.wealthsimple.com/app/activity"; // Expected URL pattern for the activity page
+    const targetURLPattern = "https://my.wealthsimple.com/app/activity";
 
-    // Only proceed to place the button if the "Activity" title is found
-    // AND the current URL matches the expected pattern.
     if (activityTitle && currentURL.startsWith(targetURLPattern)) {
-        // Create the export button
         const btn = document.createElement("button");
-        btn.id = "ws-export-btn"; // Unique ID for the button
-        btn.className = "ws-export"; // Class for styling
+        btn.id = "ws-export-btn";
+        btn.className = "ws-export";
 
-        // Create and configure the icon image
         const iconImg = document.createElement('img');
-        iconImg.src = chrome.runtime.getURL('images/csv-icon.png'); // Get URL to extension resource
+        iconImg.src = chrome.runtime.getURL('images/csv-icon.png');
         iconImg.alt = 'CSV Export Icon'; 
         iconImg.style.width = '16px'; 
         iconImg.style.height = '16px';
-        iconImg.classList.add('ws-export-icon'); 
+        iconImg.classList.add('ws-export-icon');
+        
+        // Handle icon load error gracefully
+        iconImg.onerror = () => {
+            console.warn('CSV icon failed to load, using emoji fallback');
+            iconImg.style.display = 'none';
+            btn.insertBefore(document.createTextNode('📊 '), btn.firstChild);
+        };
 
-        // Create and configure the button text
         const buttonTextSpan = document.createElement('span');
         buttonTextSpan.innerText = "Export to CSV"; 
-        buttonTextSpan.classList.add('ws-export-text'); 
+        buttonTextSpan.classList.add('ws-export-text');
 
-        // Append icon and text to the button
         btn.appendChild(iconImg);
         btn.appendChild(buttonTextSpan);
 
-        // Set up the button's click handler
         btn.onclick = () => {
             console.log("Export to CSV button clicked.");
             const transactions = extractTransactions();
             if (transactions.length === 0) {
-                alert("No transactions found on the page to export. Please scroll to load transactions, or check the extension's console for errors if the page structure has changed.");
+                alert("No transactions found on the page to export. Please scroll to load more transactions and try again.");
             } else {
                 downloadCSV(transactions);
             }
         };
 
-        // Create a flex container to hold both the title and the button
         const originalParent = activityTitle.parentNode;
         const flexContainer = document.createElement('div');
         flexContainer.style.display = 'flex';
-        flexContainer.style.alignItems = 'center'; // Vertically align items in the flex container
-        flexContainer.style.gap = '16px'; // Space between items
-        flexContainer.style.flexWrap = 'wrap'; // Allow items to wrap if space is limited
+        flexContainer.style.alignItems = 'center';
+        flexContainer.style.gap = '16px';
+        flexContainer.style.flexWrap = 'wrap';
 
-        // Insert the new flex container before the original title element
         originalParent.insertBefore(flexContainer, activityTitle);
-        // Move the original title and the new button into the flex container
         flexContainer.appendChild(activityTitle);
         flexContainer.appendChild(btn);
 
         console.log("Wealthsimple CSV Exporter: Button successfully placed on the page.");
-        return true; // Button successfully placed
+        return true;
     } else {
-        // This warning is commented out to reduce console noise during SPA loading,
-        // as the observer will keep trying until conditions are met.
-        // console.warn("Wealthsimple CSV Exporter: Target 'Activity' title or URL not matched, button not added yet.");
-        return false; // Button not placed
+        return false;
     }
 }
 
 /**
- * Initializes the button placement logic. 
- * It attempts to place the button immediately on script load.
- * If not successful, it sets up a MutationObserver to continuously watch for DOM changes,
- * which is crucial for Single-Page Applications (SPAs) like Wealthsimple.
+ * Initializes the button placement logic with retry mechanism.
  */
 function initializeButtonPlacement() {
-    // Attempt to place the button immediately when the content script loads.
-    if (placeExportButton()) {
-        return; // If successful, no need for the observer.
-    }
-
-    // If the button wasn't placed immediately (e.g., page not fully loaded or navigating within SPA),
-    // set up a MutationObserver to watch for changes in the DOM.
-    const observer = new MutationObserver((mutationsList, observer) => {
-        // For each set of DOM changes, try to place the button again.
+    // Wait a bit for the SPA to load
+    setTimeout(() => {
         if (placeExportButton()) {
-            // If the button is successfully placed, disconnect the observer to save resources.
-            observer.disconnect();
-            console.log("Wealthsimple CSV Exporter: Observer disconnected after successful button placement.");
+            return;
         }
-    });
 
-    // Start observing the document body for changes:
-    // - childList: true  --> Detect when direct children elements are added or removed.
-    // - subtree: true    --> Detect changes in any descendant element within the body.
-    observer.observe(document.body, { childList: true, subtree: true });
-    console.log("Wealthsimple CSV Exporter: MutationObserver started to watch for button placement opportunity.");
+        const observer = new MutationObserver((mutationsList, observer) => {
+            if (placeExportButton()) {
+                observer.disconnect();
+                console.log("Wealthsimple CSV Exporter: Observer disconnected after successful button placement.");
+            }
+        });
+
+        observer.observe(document.body, { childList: true, subtree: true });
+        console.log("Wealthsimple CSV Exporter: MutationObserver started to watch for button placement opportunity.");
+    }, 1000);
 }
 
-// Initial call to start the button placement logic when the content script is injected into the page.
+// Initial call to start the button placement logic
 initializeButtonPlacement();
