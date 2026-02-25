@@ -52,6 +52,28 @@
     border-color: rgb(180, 180, 180);
 }
 
+.ws-sync {
+    background-color: rgb(50, 48, 47);
+    color: rgb(255, 255, 255);
+    border: 1px solid rgb(50, 48, 47);
+}
+
+.ws-sync:hover {
+    background-color: rgb(80, 78, 77);
+    border-color: rgb(80, 78, 77);
+}
+
+.ws-sync:active {
+    background-color: rgb(30, 28, 27);
+    border-color: rgb(30, 28, 27);
+}
+
+.ws-sync:disabled {
+    background-color: rgb(150, 150, 150);
+    border-color: rgb(150, 150, 150);
+    cursor: not-allowed;
+}
+
 /* Icon and text alignment */
 .ws-export-icon {
     vertical-align: middle;

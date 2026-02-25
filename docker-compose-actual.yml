@@ -1,0 +1,41 @@
+version: "3.9"
+
+services:
+  actual_server:
+    image: actualbudget/actual-server:latest
+    container_name: Actual
+    hostname: actual
+    mem_limit: 512m
+    mem_reservation: 128m
+    cpu_shares: 512
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped 
+    ports:
+      - 8304:5006
+    volumes:
+      - /volume2/docker/actual:/data
+    environment:
+      TZ: America/Toronto
+    networks:
+      - actual_default
+
+  actualhttpapi:
+    image: jhonderson/actual-http-api:latest
+    container_name: ActualAPI
+    security_opt:
+      - no-new-privileges:true
+    restart: on-failure:5
+    ports:
+      - 5007:5007
+    environment:
+      - ACTUAL_SERVER_URL=http://actual_server:5006
+      - ACTUAL_SERVER_PASSWORD=ujn-edm9uej*KPD8hnq
+      - ACTUAL_API_KEY=KPD8hnq
+    networks:
+      - actual_default
+
+networks:
+  actual_default:
+    name: actual_default
+    driver: bridge

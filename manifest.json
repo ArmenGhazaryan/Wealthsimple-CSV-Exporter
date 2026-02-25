@@ -6,7 +6,16 @@
 
   "permissions": ["activeTab", "storage"],
 
-  "host_permissions": ["https://my.wealthsimple.com/app/activity*"],
+  "host_permissions": [
+    "https://my.wealthsimple.com/app/activity*",
+    "http://localhost:*/*",
+    "http://127.0.0.1:*/*",
+    "http://192.168.11.100:*/*"
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  },
 
   "content_scripts": [
     {
@@ -17,6 +26,7 @@
   ],
 
   "action": {
+    "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",
