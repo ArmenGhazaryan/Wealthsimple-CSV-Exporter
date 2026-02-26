@@ -113,7 +113,7 @@ function extractTransactions() {
             let container = dateHeader.nextElementSibling;
             
             // Look for the container with transaction buttons
-            while (container && container.tagName !== 'H2') {
+            while (container && container !== dateHeader.parentElement.nextElementSibling) {
                 const buttons = container.querySelectorAll('button[type="button"]');
                 
                 if (buttons.length > 0) {
@@ -123,16 +123,6 @@ function extractTransactions() {
                         if (paragraphs.length >= 2) {
                             const merchant = paragraphs[0].innerText.trim();
                             const rawAmountText = paragraphs[paragraphs.length - 1].innerText.trim();
-                            
-                            // Notes/Category could be in the middle paragraphs
-                            let notes = "";
-                            let category = "";
-                            if (paragraphs.length > 2) {
-                                category = paragraphs[1].innerText.trim();
-                            }
-                            if (paragraphs.length > 3) {
-                                notes = Array.from(paragraphs).slice(2, paragraphs.length - 1).map(p => p.innerText.trim()).join(" | ");
-                            }
                             
                             // Check if this looks like an amount
                             if (/[\d$]/.test(rawAmountText)) {
@@ -154,8 +144,8 @@ function extractTransactions() {
                                             date: parsedDate,
                                             amount: amountValue,
                                             payee: merchant,
-                                            notes: notes,
-                                            category: category,
+                                            notes: "",
+                                            category: "",
                                             import_id: importId
                                         });
                                     }
@@ -163,6 +153,7 @@ function extractTransactions() {
                             }
                         }
                     });
+                    break; // Found the transaction container, move to next date header
                 }
                 container = container.nextElementSibling;
             }
@@ -211,15 +202,6 @@ function extractTransactions() {
                     const potentialMerchant = paragraphs[0].innerText.trim();
                     const potentialAmount = paragraphs[paragraphs.length - 1].innerText.trim();
                     
-                    let notes = "";
-                    let category = "";
-                    if (paragraphs.length > 2) {
-                        category = paragraphs[1].innerText.trim();
-                    }
-                    if (paragraphs.length > 3) {
-                        notes = Array.from(paragraphs).slice(2, paragraphs.length - 1).map(p => p.innerText.trim()).join(" | ");
-                    }
-                    
                     if (/[\d$]/.test(potentialAmount) && potentialMerchant.length > 0) {
                         const cleanedAmount = potentialAmount
                             .replace(/[−–—\u2212]/g, '-')
@@ -238,8 +220,8 @@ function extractTransactions() {
                                     date: parsedDate,
                                     amount: amountValue,
                                     payee: potentialMerchant,
-                                    notes: notes,
-                                    category: category,
+                                    notes: "",
+                                    category: "",
                                     import_id: importId
                                 });
                             }
@@ -261,97 +243,10 @@ function extractTransactions() {
 }
 
 /**
- * Submits transactions directly to Actual Budget API via background service worker
- */
-async function syncToActualBudget(transactions, accountName, settings, btnElement) {
-    const { apiUrl, apiKey, budgetId, accountMap } = settings;
-    
-    if (!apiUrl || !budgetId) {
-        alert("Actual Budget API URL or Budget ID is missing in settings.");
-        return false;
-    }
-
-    const actualAccountId = accountMap && accountMap[accountName] ? accountMap[accountName] : null;
-    
-    if (!actualAccountId) {
-        alert(`No Actual Budget Account ID mapped for Wealthsimple account: '${accountName}'. Please update your extension settings.`);
-        return false;
-    }
-
-    // Format transactions for Actual Budget
-    const formattedTransactions = transactions.map(tx => {
-        const dateObj = new Date(tx.date);
-        const yyyy = dateObj.getFullYear();
-        const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
-        const dd = String(dateObj.getDate()).padStart(2, '0');
-        
-        return {
-            date: `${yyyy}-${mm}-${dd}`,
-            amount: Math.round(tx.amount * 100),
-            payee_name: tx.payee,
-            notes: [tx.category, tx.notes].filter(Boolean).join(" | "),
-            imported_id: tx.import_id
-        };
-    });
-
-    try {
-        console.log(`Sending ${formattedTransactions.length} transactions to Actual Budget...`);
-        
-        let originalText = "Sync to Actual Budget";
-        if (btnElement && btnElement.querySelector('.ws-export-text')) {
-            originalText = btnElement.querySelector('.ws-export-text').innerText;
-            btnElement.querySelector('.ws-export-text').innerText = "Syncing...";
-        }
-        
-        // Send message to background script to bypass CORS
-        chrome.runtime.sendMessage({
-            action: 'syncToActual',
-            url: `${apiUrl}/budgets/${budgetId}/accounts/${actualAccountId}/transactions/import`,
-            apiKey: apiKey,
-            transactions: formattedTransactions
-        }, (response) => {
-            if (response && response.success) {
-                console.log("Actual Budget response:", response.data);
-                if (btnElement) {
-                    btnElement.querySelector('.ws-export-text').innerText = `Synced ${formattedTransactions.length}!`;
-                    btnElement.style.backgroundColor = "#e6f4ea";
-                    btnElement.style.borderColor = "#c3e6cb";
-                    btnElement.style.color = "#155724";
-                }
-            } else {
-                console.error("Failed to sync to Actual Budget:", response ? response.error : chrome.runtime.lastError);
-                alert(`Failed to sync to Actual Budget: ${response ? response.error : 'Unknown error'}`);
-                if (btnElement) {
-                    btnElement.querySelector('.ws-export-text').innerText = "Sync Failed";
-                    btnElement.style.backgroundColor = "#f8d7da";
-                    btnElement.style.borderColor = "#f5c6cb";
-                    btnElement.style.color = "#721c24";
-                }
-            }
-            
-            setTimeout(() => {
-                if (btnElement) {
-                    btnElement.querySelector('.ws-export-text').innerText = originalText;
-                    btnElement.style.backgroundColor = "";
-                    btnElement.style.borderColor = "";
-                    btnElement.style.color = "";
-                }
-            }, 3000);
-        });
-        
-        return true;
-
-    } catch (error) {
-        console.error("Failed to prepare sync to Actual Budget:", error);
-        alert(`Failed to sync to Actual Budget: ${error.message}`);
-        return false;
-    }
-}
-
-/**
  * Downloads the given transactions as a CSV file.
+ * @param {Array<Object>} transactions - An array of transaction objects.
  */
-function downloadCSV(transactions, accountName) {
+function downloadCSV(transactions) {
     console.log("Preparing CSV content for download...");
     const headers = ["id", "date", "amount", "payee", "notes", "category", "import_id"];
     
@@ -364,16 +259,14 @@ function downloadCSV(transactions, accountName) {
             }
             return `"${String(value).replace(/"/g, '""')}"`;
         }).join(","))
-    ].join("\\n");
+    ].join("\n");
 
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     
     const link = document.createElement("a");
     link.href = url;
-    
-    const safeAccountName = accountName ? `${accountName.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_` : '';
-    link.download = `wealthsimple_${safeAccountName}transactions_${new Date().toISOString().slice(0,10)}.csv`;
+    link.download = `wealthsimple_transactions_${new Date().toISOString().slice(0,10)}.csv`;
     
     document.body.appendChild(link);
     link.click();
@@ -384,45 +277,11 @@ function downloadCSV(transactions, accountName) {
 }
 
 /**
- * Infer the current account name from the URL or page content
- */
-function inferAccountName() {
-    let accountName = "account";
-    const urlParams = new URLSearchParams(window.location.search);
-    const accountId = urlParams.get('account_ids');
-    
-    if (accountId) {
-        if (accountId.includes('cash')) {
-            accountName = "cash";
-        } else if (accountId.includes('credit-card')) {
-            accountName = "credit_card";
-        } else if (accountId.includes('non-registered')) {
-            accountName = "personal";
-        } else if (accountId.includes('tfsa')) {
-            accountName = "tfsa";
-        } else if (accountId.includes('rrsp')) {
-            accountName = "rrsp";
-        } else {
-            accountName = accountId.split('-')[0] || accountId;
-        }
-    } else {
-        const possibleAccounts = Array.from(document.querySelectorAll('p[data-fs-privacy-rule="unmask"]'))
-            .map(el => el.innerText.trim());
-        if (possibleAccounts.includes('Chequing') || possibleAccounts.includes('Cash')) {
-             accountName = 'cash';
-        } else if (possibleAccounts.some(text => text.includes('Credit card'))) {
-             accountName = 'credit_card';
-        }
-    }
-    return accountName;
-}
-
-/**
- * Attempts to find the "Activity" title on the page and place the action button(s).
+ * Attempts to find the "Activity" title on the page and place the export button next to it.
+ * Returns true if the button was successfully placed, false otherwise.
  */
 function placeExportButton() {
-    // Check if our container already exists to avoid duplicates
-    if (document.getElementById("ws-buttons-container")) {
+    if (document.getElementById("ws-export-btn")) {
         return true;
     }
 
@@ -441,102 +300,53 @@ function placeExportButton() {
     const targetURLPattern = "https://my.wealthsimple.com/app/activity";
 
     if (activityTitle && currentURL.startsWith(targetURLPattern)) {
+        const btn = document.createElement("button");
+        btn.id = "ws-export-btn";
+        btn.className = "ws-export";
+
+        const iconImg = document.createElement('img');
+        iconImg.src = chrome.runtime.getURL('images/csv-icon.png');
+        iconImg.alt = 'CSV Export Icon'; 
+        iconImg.style.width = '16px'; 
+        iconImg.style.height = '16px';
+        iconImg.classList.add('ws-export-icon');
         
-        chrome.storage.sync.get(['apiUrl', 'budgetId'], (settings) => {
-            // Check again after async callback just in case
-            if (document.getElementById("ws-buttons-container")) return;
-            
-            const hasActualSetup = settings.apiUrl && settings.budgetId;
-            
-            const originalParent = activityTitle.parentNode;
-            const flexContainer = document.createElement('div');
-            flexContainer.id = "ws-buttons-container";
-            flexContainer.style.display = 'flex';
-            flexContainer.style.alignItems = 'center';
-            flexContainer.style.gap = '12px';
-            flexContainer.style.flexWrap = 'wrap';
+        // Handle icon load error gracefully
+        iconImg.onerror = () => {
+            console.warn('CSV icon failed to load, using emoji fallback');
+            iconImg.style.display = 'none';
+            btn.insertBefore(document.createTextNode('📊 '), btn.firstChild);
+        };
 
-            // Clean up old individual buttons if they linger
-            const oldBtn = document.getElementById("ws-export-btn");
-            if (oldBtn && oldBtn.parentNode !== flexContainer) oldBtn.remove();
-            const oldSync = document.getElementById("ws-sync-btn");
-            if (oldSync && oldSync.parentNode !== flexContainer) oldSync.remove();
-            
-            originalParent.insertBefore(flexContainer, activityTitle);
-            flexContainer.appendChild(activityTitle);
+        const buttonTextSpan = document.createElement('span');
+        buttonTextSpan.innerText = "Export to CSV"; 
+        buttonTextSpan.classList.add('ws-export-text');
 
-            // 1. Sync Button (if configured)
-            if (hasActualSetup) {
-                const syncBtn = document.createElement("button");
-                syncBtn.id = "ws-sync-btn";
-                syncBtn.className = "ws-export ws-sync";
-                
-                const syncIcon = document.createElement('img');
-                syncIcon.src = chrome.runtime.getURL('images/csv-icon.png');
-                syncIcon.style.width = '16px'; 
-                syncIcon.style.height = '16px';
-                syncIcon.style.filter = "invert(1) brightness(2)";
-                syncIcon.onerror = () => {
-                    syncIcon.style.display = 'none';
-                    syncBtn.insertBefore(document.createTextNode('🔄 '), syncBtn.firstChild);
-                };
-                
-                const syncText = document.createElement('span');
-                syncText.innerText = "Sync to Actual Budget";
-                syncText.className = 'ws-export-text';
-                
-                syncBtn.appendChild(syncIcon);
-                syncBtn.appendChild(syncText);
-                
-                syncBtn.onclick = () => {
-                    const accountName = inferAccountName();
-                    const transactions = extractTransactions();
-                    if (transactions.length === 0) {
-                        alert("No transactions found to sync. Scroll down and try again.");
-                    } else {
-                        chrome.storage.sync.get(['apiUrl', 'apiKey', 'budgetId', 'accountMap'], (latestSettings) => {
-                            syncToActualBudget(transactions, accountName, latestSettings, syncBtn);
-                        });
-                    }
-                };
-                flexContainer.appendChild(syncBtn);
+        btn.appendChild(iconImg);
+        btn.appendChild(buttonTextSpan);
+
+        btn.onclick = () => {
+            console.log("Export to CSV button clicked.");
+            const transactions = extractTransactions();
+            if (transactions.length === 0) {
+                alert("No transactions found on the page to export. Please scroll to load more transactions and try again.");
+            } else {
+                downloadCSV(transactions);
             }
-            
-            // 2. Export CSV Button (always available as fallback)
-            const csvBtn = document.createElement("button");
-            csvBtn.id = "ws-export-btn";
-            csvBtn.className = "ws-export";
-            
-            const csvIcon = document.createElement('img');
-            csvIcon.src = chrome.runtime.getURL('images/csv-icon.png');
-            csvIcon.style.width = '16px'; 
-            csvIcon.style.height = '16px';
-            csvIcon.onerror = () => {
-                csvIcon.style.display = 'none';
-                csvBtn.insertBefore(document.createTextNode('📊 '), csvBtn.firstChild);
-            };
-            
-            const csvText = document.createElement('span');
-            csvText.innerText = "Export CSV";
-            csvText.className = 'ws-export-text';
-            
-            csvBtn.appendChild(csvIcon);
-            csvBtn.appendChild(csvText);
-            
-            csvBtn.onclick = () => {
-                const accountName = inferAccountName();
-                const transactions = extractTransactions();
-                if (transactions.length === 0) {
-                    alert("No transactions found to export. Scroll down and try again.");
-                } else {
-                    downloadCSV(transactions, accountName);
-                }
-            };
-            flexContainer.appendChild(csvBtn);
-            
-            console.log("Wealthsimple Exporter: Action buttons placed.");
-        });
+        };
 
+        const originalParent = activityTitle.parentNode;
+        const flexContainer = document.createElement('div');
+        flexContainer.style.display = 'flex';
+        flexContainer.style.alignItems = 'center';
+        flexContainer.style.gap = '16px';
+        flexContainer.style.flexWrap = 'wrap';
+
+        originalParent.insertBefore(flexContainer, activityTitle);
+        flexContainer.appendChild(activityTitle);
+        flexContainer.appendChild(btn);
+
+        console.log("Wealthsimple CSV Exporter: Button successfully placed on the page.");
         return true;
     } else {
         return false;
@@ -547,29 +357,22 @@ function placeExportButton() {
  * Initializes the button placement logic with retry mechanism.
  */
 function initializeButtonPlacement() {
-    // Attempt placement initially
-    setTimeout(placeExportButton, 1000);
-
-    // Watch for DOM changes (for SPA navigation)
-    const observer = new MutationObserver(() => {
-        if (window.location.href.startsWith("https://my.wealthsimple.com/app/activity") && !document.getElementById("ws-buttons-container")) {
-             placeExportButton();
+    // Wait a bit for the SPA to load
+    setTimeout(() => {
+        if (placeExportButton()) {
+            return;
         }
-    });
 
-    observer.observe(document.body, { childList: true, subtree: true });
-    
-    // Also listen for history changes
-    let lastUrl = location.href; 
-    new MutationObserver(() => {
-      const url = location.href;
-      if (url !== lastUrl) {
-        lastUrl = url;
-        if (url.startsWith("https://my.wealthsimple.com/app/activity")) {
-            setTimeout(placeExportButton, 1000);
-        }
-      }
-    }).observe(document, {subtree: true, childList: true});
+        const observer = new MutationObserver((mutationsList, observer) => {
+            if (placeExportButton()) {
+                observer.disconnect();
+                console.log("Wealthsimple CSV Exporter: Observer disconnected after successful button placement.");
+            }
+        });
+
+        observer.observe(document.body, { childList: true, subtree: true });
+        console.log("Wealthsimple CSV Exporter: MutationObserver started to watch for button placement opportunity.");
+    }, 1000);
 }
 
 // Initial call to start the button placement logic
