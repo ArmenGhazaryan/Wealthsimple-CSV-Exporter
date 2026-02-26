@@ -113,7 +113,7 @@ function extractTransactions() {
             let container = dateHeader.nextElementSibling;
             
             // Look for the container with transaction buttons
-            while (container && container !== dateHeader.parentElement.nextElementSibling) {
+            while (container && container.nodeName == 'DIV') {
                 const buttons = container.querySelectorAll('button[type="button"]');
                 
                 if (buttons.length > 0) {
@@ -153,8 +153,7 @@ function extractTransactions() {
                             }
                         }
                     });
-                    break; // Found the transaction container, move to next date header
-                }
+                                    }
                 container = container.nextElementSibling;
             }
         });
